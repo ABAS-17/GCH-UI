@@ -1,13 +1,14 @@
+// app/maps/page.tsx - FIXED VERSION - NO MORE API SPAM
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import GoogleMapView from '@/components/GoogleMapView'
 import IncidentList from '@/components/IncidentList'
 import MapFilters from '@/components/MapFilters'
 import { useGeolocation } from '@/lib/hooks/useGeolocation'
 import { useIncidents, type ProcessedIncident } from '@/lib/hooks/useIncidents'
 import { incidentsAPI } from '@/lib/api/incidents'
-import { RefreshCw, MapPin, AlertCircle, Navigation, Loader, Database } from 'lucide-react'
+import { RefreshCw, MapPin, AlertCircle, Navigation, Loader, Database, Globe } from 'lucide-react'
 
 const INCIDENT_TYPES = [
   { key: 'all', label: 'All', icon: '🌟', color: 'bg-gray-500' },
@@ -18,13 +19,18 @@ const INCIDENT_TYPES = [
   { key: 'safety', label: 'Safety', icon: '🚨', color: 'bg-purple-500' },
 ]
 
-// Main component function
-function MapsPage() {
+export default function MapsPage() {
   const [filteredIncidents, setFilteredIncidents] = useState<ProcessedIncident[]>([])
   const [activeFilter, setActiveFilter] = useState<string>('all')
   const [selectedIncident, setSelectedIncident] = useState<ProcessedIncident | null>(null)
-  const [searchRadius, setSearchRadius] = useState(20)
-  const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null)
+  const [searchRadius, setSearchRadius] = useState(15)
+  const [currentLocationName, setCurrentLocationName] = useState<string>('')
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false)
+
+  // FIXED: Add refs to prevent unnecessary API calls
+  const lastRadiusChangeRef = useRef<number>(0)
+  const geocodingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const filterChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Enhanced geolocation
   const {
@@ -42,7 +48,7 @@ function MapsPage() {
     enableFallback: true
   });
 
-  // PURE BACKEND incidents hook
+  // FIXED: Controlled incidents hook with debounced radius
   const {
     incidents,
     isLoading: incidentsLoading,
@@ -58,19 +64,96 @@ function MapsPage() {
     radiusKm: searchRadius,
     maxResults: 100,
     autoRefresh: true,
-    refreshInterval: 30000
+    refreshInterval: 60000 // FIXED: Increased to 60 seconds to reduce API calls
   });
 
-  // Check backend health on mount
+  // FIXED: Debounced reverse geocoding
   useEffect(() => {
-    const checkBackend = async () => {
-      const healthy = await incidentsAPI.healthCheck();
-      setBackendHealthy(healthy);
-    };
-    checkBackend();
-  }, []);
+    if (geocodingTimeoutRef.current) {
+      clearTimeout(geocodingTimeoutRef.current);
+    }
 
-  // Filter incidents
+    if (!latitude || !longitude) {
+      setCurrentLocationName('');
+      return;
+    }
+
+    // FIXED: Debounce geocoding requests by 2 seconds
+    geocodingTimeoutRef.current = setTimeout(async () => {
+      setIsLoadingLocation(true);
+      try {
+        console.log('🌍 Reverse geocoding:', latitude, longitude);
+        
+        const response = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}`
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.results && data.results.length > 0) {
+            const result = data.results[0];
+            const addressComponents = result.address_components;
+            
+            let locationName = '';
+            const locality = addressComponents.find((comp: any) => 
+              comp.types.includes('locality') || comp.types.includes('sublocality_level_1')
+            );
+            const area = addressComponents.find((comp: any) => 
+              comp.types.includes('administrative_area_level_2') || comp.types.includes('administrative_area_level_1')
+            );
+            
+            if (locality) {
+              locationName = locality.long_name;
+            } else if (area) {
+              locationName = area.long_name;
+            } else {
+              const parts = result.formatted_address.split(',');
+              locationName = parts[0] || 'Unknown Area';
+            }
+            
+            setCurrentLocationName(locationName);
+            console.log('✅ Geocoded location:', locationName);
+          } else {
+            setCurrentLocationName('Unknown Area');
+          }
+        } else {
+          // Fallback for Bengaluru area
+          if (latitude >= 12.8 && latitude <= 13.2 && longitude >= 77.4 && longitude <= 77.8) {
+            setCurrentLocationName('Bengaluru');
+          } else {
+            setCurrentLocationName(`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
+          }
+        }
+      } catch (error) {
+        console.error('Geocoding error:', error);
+        if (latitude >= 12.8 && latitude <= 13.2 && longitude >= 77.4 && longitude <= 77.8) {
+          setCurrentLocationName('Bengaluru Area');
+        } else {
+          setCurrentLocationName('Current Location');
+        }
+      } finally {
+        setIsLoadingLocation(false);
+      }
+    }, 2000); // 2 second debounce
+
+    return () => {
+      if (geocodingTimeoutRef.current) {
+        clearTimeout(geocodingTimeoutRef.current);
+      }
+    };
+  }, [latitude, longitude]);
+
+  // FIXED: Remove auto-radius adjustment that was causing API spam
+  // This was continuously triggering new requests!
+  // useEffect(() => {
+  //   if (incidents.length === 0 && searchRadius < 50) {
+  //     setSearchRadius(prev => Math.min(prev + 5, 50));
+  //   } else if (incidents.length > 20 && searchRadius > 10) {
+  //     setSearchRadius(prev => Math.max(prev - 2, 10));
+  //   }
+  // }, [incidents.length, searchRadius]);
+
+  // Filter incidents (client-side only)
   useEffect(() => {
     if (activeFilter === 'all') {
       setFilteredIncidents(incidents)
@@ -79,13 +162,23 @@ function MapsPage() {
     }
   }, [incidents, activeFilter])
 
-  // Handlers
+  // FIXED: Debounced filter change handler
   const handleFilterChange = async (filterKey: string) => {
-    setActiveFilter(filterKey)
+    setActiveFilter(filterKey);
+    
+    // Clear any pending filter change
+    if (filterChangeTimeoutRef.current) {
+      clearTimeout(filterChangeTimeoutRef.current);
+    }
+
+    // FIXED: Don't make API calls for every filter change
+    // Let the client-side filtering handle it unless it's a specific topic search
     if (filterKey !== 'all' && latitude && longitude) {
-      await fetchByTopic(filterKey)
-    } else if (filterKey === 'all') {
-      await refetchIncidents()
+      // Debounce topic-specific API calls
+      filterChangeTimeoutRef.current = setTimeout(async () => {
+        console.log(`🎯 Filter changed to: ${filterKey}`);
+        await fetchByTopic(filterKey);
+      }, 1000); // 1 second debounce
     }
   }
 
@@ -112,16 +205,43 @@ function MapsPage() {
     window.location.href = `/chat?context=${contextParam}`
   }
 
+  // FIXED: Manual refresh with debouncing
   const handleRefresh = async () => {
-    await refetchIncidents()
+    const now = Date.now();
+    
+    // FIXED: Prevent spam clicking refresh button
+    if (now - lastRadiusChangeRef.current < 2000) {
+      console.log('🚫 Refresh throttled, please wait...');
+      return;
+    }
+    
+    lastRadiusChangeRef.current = now;
+    console.log('🔄 Manual refresh triggered');
+    await refetchIncidents();
+  }
+
+  // FIXED: Controlled radius change handler
+  const handleRadiusChange = (newRadius: number) => {
+    const now = Date.now();
+    
+    // FIXED: Throttle radius changes to prevent API spam
+    if (now - lastRadiusChangeRef.current < 3000) {
+      console.log('🚫 Radius change throttled, please wait...');
+      return;
+    }
+    
+    lastRadiusChangeRef.current = now;
+    console.log(`📏 Radius changed to: ${newRadius}km`);
+    setSearchRadius(newRadius);
   }
 
   // Populate demo data if no incidents found
   const handlePopulateDemoData = async () => {
     try {
+      console.log('🎭 Populating demo data...');
       const success = await incidentsAPI.populateDemoData(15);
       if (success) {
-        // Wait for indexing then refresh
+        // Wait 3 seconds before refetching to allow backend processing
         setTimeout(() => {
           refetchIncidents();
         }, 3000);
@@ -131,12 +251,12 @@ function MapsPage() {
     }
   }
 
-  const getLocationSource = () => {
-    if (!latitude || !longitude) return 'No location';
-    if (accuracy && accuracy < 100) return 'GPS';
-    if (accuracy && accuracy < 1000) return 'Network';
-    if (accuracy && accuracy < 10000) return 'IP Location';
-    return 'Approximate';
+  const getLocationAccuracy = () => {
+    if (!accuracy) return 'GPS';
+    if (accuracy < 50) return 'High Precision GPS';
+    if (accuracy < 100) return 'GPS';
+    if (accuracy < 1000) return 'Network Location';
+    return 'Approximate Location';
   };
 
   const formatLastUpdated = (date: Date | null) => {
@@ -162,26 +282,60 @@ function MapsPage() {
             <div>
               <h1 className="text-xl font-semibold text-gray-900 mb-2">🗺️ Live City Map</h1>
               <div className="flex items-center gap-2 text-sm">
-                <span className="text-gray-600">PURE BACKEND DATA ONLY</span>
+                {isLoadingLocation ? (
+                  <span className="flex items-center gap-1 text-blue-600">
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Getting area info...
+                  </span>
+                ) : currentLocationName ? (
+                  <span className="flex items-center gap-1 text-green-700">
+                    <Globe className="w-4 h-4" />
+                    Viewing: {currentLocationName}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-gray-600">
+                    <Globe className="w-4 h-4" />
+                    Area: Unknown
+                  </span>
+                )}
+                
                 <span className="text-gray-400">•</span>
+                
                 {locationLoading ? (
                   <span className="flex items-center gap-1 text-blue-600">
                     <Loader className="w-4 h-4 animate-spin" />
-                    Getting location...
+                    Locating...
                   </span>
                 ) : latitude && longitude ? (
                   <span className="flex items-center gap-1 text-green-600">
                     <Navigation className="w-4 h-4" />
-                    {getLocationSource()}: {latitude.toFixed(4)}, {longitude.toFixed(4)}
+                    {getLocationAccuracy()}: {latitude.toFixed(4)}, {longitude.toFixed(4)}
                   </span>
                 ) : (
-                  <span className="text-red-600">📍 Location required</span>
+                  <span className="text-red-600">📍 Location needed</span>
                 )}
               </div>
             </div>
             
             <div className="flex items-center gap-3">
-              {/* Populate Demo Data Button (only if no incidents) */}
+              {/* FIXED: Controlled radius control */}
+              <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
+                <span className="text-sm text-gray-600">Radius:</span>
+                <select
+                  value={searchRadius}
+                  onChange={(e) => handleRadiusChange(Number(e.target.value))}
+                  className="bg-transparent text-sm font-medium text-gray-800 border-none outline-none"
+                >
+                  <option value={5}>5km</option>
+                  <option value={10}>10km</option>
+                  <option value={15}>15km</option>
+                  <option value={20}>20km</option>
+                  <option value={30}>30km</option>
+                  <option value={50}>50km</option>
+                </select>
+              </div>
+
+              {/* Demo data button */}
               {totalCount === 0 && !incidentsLoading && (
                 <button
                   onClick={handlePopulateDemoData}
@@ -192,7 +346,7 @@ function MapsPage() {
                 </button>
               )}
 
-              {/* Get Location Button */}
+              {/* Get location button */}
               {(!latitude || !longitude) && (
                 <button
                   onClick={requestLocation}
@@ -208,7 +362,7 @@ function MapsPage() {
                 </button>
               )}
 
-              {/* Refresh Button */}
+              {/* FIXED: Controlled refresh button */}
               <button
                 onClick={handleRefresh}
                 disabled={incidentsLoading}
@@ -220,25 +374,23 @@ function MapsPage() {
             </div>
           </div>
 
-          {/* Status Bar */}
+          {/* Status bar */}
           <div className="mt-3 flex items-center justify-between text-sm">
             <div className="flex items-center gap-4">
-              <span className={`flex items-center gap-1 ${
-                backendHealthy === false ? 'text-red-600' : 
-                backendHealthy === true ? 'text-green-600' : 'text-yellow-600'
-              }`}>
-                <Database className="w-4 h-4" />
-                {backendHealthy === false ? 'Backend Offline' : 
-                 backendHealthy === true ? 'Backend Connected' : 'Checking Backend...'}
+              <span className="text-gray-700 font-medium">
+                📍 {totalCount} incident{totalCount !== 1 ? 's' : ''} found
               </span>
-              
               <span className="text-gray-600">
-                {totalCount} backend incidents • {searchRadius}km radius
+                within {searchRadius}km of {currentLocationName || 'your location'}
               </span>
-              
               <span className="text-gray-500">
-                Last fetch: {formatLastUpdated(lastUpdated)}
+                Updated: {formatLastUpdated(lastUpdated)}
               </span>
+              {accuracy && (
+                <span className="text-green-600 text-xs">
+                  ±{Math.round(accuracy)}m accuracy
+                </span>
+              )}
             </div>
 
             {(incidentsError || locationError) && (
@@ -249,14 +401,15 @@ function MapsPage() {
             )}
           </div>
 
-          {/* No Data State */}
+          {/* No data state */}
           {totalCount === 0 && !incidentsLoading && !incidentsError && (
-            <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-yellow-600" />
+                <Database className="w-5 h-5 text-blue-600" />
                 <div className="flex-1">
-                  <p className="text-sm text-yellow-800">
-                    No incidents found in backend within {searchRadius}km radius. Try populating demo data or check if your backend has incidents.
+                  <p className="text-sm text-blue-800">
+                    No incidents found within {searchRadius}km of {currentLocationName || 'your location'}. 
+                    Try expanding the search radius or populate demo data.
                   </p>
                 </div>
               </div>
@@ -265,7 +418,7 @@ function MapsPage() {
         </div>
       </header>
 
-      {/* Filters */}
+      {/* FIXED: Controlled filters */}
       <div className="bg-white border-b border-gray-200 p-4">
         <div className="max-w-6xl mx-auto">
           <MapFilters
@@ -277,9 +430,8 @@ function MapsPage() {
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main content */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* Map */}
         <div className="flex-1 relative">
           <GoogleMapView
             incidents={filteredIncidents}
@@ -289,14 +441,16 @@ function MapsPage() {
           />
         </div>
 
-        {/* Incident List */}
         <div className="lg:w-80 bg-white border-l border-gray-200 flex flex-col max-h-96 lg:max-h-none">
           <div className="p-4 border-b border-gray-200">
             <h2 className="font-semibold text-gray-900">
-              {activeFilter === 'all' ? 'All Backend Incidents' : INCIDENT_TYPES.find(f => f.key === activeFilter)?.label}
+              {activeFilter === 'all' ? 'All Incidents' : INCIDENT_TYPES.find(f => f.key === activeFilter)?.label}
             </h2>
             <p className="text-sm text-gray-600 mt-1">
-              {filteredIncidents.length} incident{filteredIncidents.length !== 1 ? 's' : ''} from backend
+              {filteredIncidents.length} incident{filteredIncidents.length !== 1 ? 's' : ''} 
+              {currentLocationName && (
+                <span> near {currentLocationName}</span>
+              )}
               {lastUpdated && (
                 <span className="text-gray-400"> • {formatLastUpdated(lastUpdated)}</span>
               )}
@@ -315,6 +469,3 @@ function MapsPage() {
     </div>
   )
 }
-
-// REQUIRED: Default export for Next.js App Router
-export default MapsPage;
