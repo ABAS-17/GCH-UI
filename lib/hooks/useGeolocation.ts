@@ -1,23 +1,27 @@
-// lib/hooks/useGeolocation.ts - Enhanced for better location detection
+// lib/hooks/useGeolocation.ts - Pure Live Location Tracking
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface GeolocationState {
   latitude: number | null;
   longitude: number | null;
   accuracy: number | null;
+  heading: number | null; // Compass direction
+  speed: number | null; // Movement speed
+  altitude: number | null;
   error: string | null;
   loading: boolean;
   permissionStatus: 'granted' | 'denied' | 'prompt' | 'unknown';
+  isTracking: boolean;
 }
 
 interface UseGeolocationOptions {
   enableHighAccuracy?: boolean;
   timeout?: number;
   maximumAge?: number;
-  watch?: boolean;
-  enableFallback?: boolean;
+  enableTracking?: boolean; // Continuous tracking like Google Maps
+  trackingInterval?: number; // How often to update position
 }
 
 export function useGeolocation(options: UseGeolocationOptions = {}) {
@@ -25,274 +29,262 @@ export function useGeolocation(options: UseGeolocationOptions = {}) {
     latitude: null,
     longitude: null,
     accuracy: null,
+    heading: null,
+    speed: null,
+    altitude: null,
     error: null,
     loading: true,
-    permissionStatus: 'unknown'
+    permissionStatus: 'unknown',
+    isTracking: false
   });
 
   const {
     enableHighAccuracy = true,
-    timeout = 15000, // Increased timeout
-    maximumAge = 60000,
-    watch = false,
-    enableFallback = true
+    timeout = 10000, // Reduced timeout for faster response
+    maximumAge = 30000, // 30 seconds max age for cached position
+    enableTracking = true, // Enable continuous tracking by default
+    trackingInterval = 5000 // Update every 5 seconds when tracking
   } = options;
 
-  useEffect(() => {
-    let watchId: number | undefined;
-    let timeoutId: NodeJS.Timeout;
+  const watchIdRef = useRef<number | undefined>();
+  const trackingIntervalRef = useRef<NodeJS.Timeout | undefined>();
+  const lastUpdateRef = useRef<number>(0);
 
-    const updateLocation = (position: GeolocationPosition) => {
-      console.log('📍 Location obtained:', {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracy: position.coords.accuracy
-      });
+  const updateLocation = (position: GeolocationPosition) => {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastUpdateRef.current;
+    
+    // Prevent too frequent updates (minimum 1 second apart)
+    if (timeSinceLastUpdate < 1000 && lastUpdateRef.current > 0) {
+      return;
+    }
+    
+    lastUpdateRef.current = now;
 
-      setState({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-        error: null,
+    console.log('📍 Live location update:', {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      heading: position.coords.heading,
+      speed: position.coords.speed,
+      timestamp: new Date(position.timestamp).toLocaleTimeString()
+    });
+
+    setState(prev => ({
+      ...prev,
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      heading: position.coords.heading,
+      speed: position.coords.speed,
+      altitude: position.coords.altitude,
+      error: null,
+      loading: false,
+      permissionStatus: 'granted',
+      isTracking: true
+    }));
+  };
+
+  const handleError = (error: GeolocationPositionError) => {
+    let errorMessage = 'Unknown location error';
+    let permissionStatus: GeolocationState['permissionStatus'] = 'unknown';
+
+    console.error('❌ Geolocation error:', error);
+
+    switch (error.code) {
+      case error.PERMISSION_DENIED:
+        errorMessage = 'Location access denied - please enable location permissions';
+        permissionStatus = 'denied';
+        break;
+      case error.POSITION_UNAVAILABLE:
+        errorMessage = 'Location information unavailable - check GPS/network';
+        break;
+      case error.TIMEOUT:
+        errorMessage = 'Location request timeout - trying again...';
+        // Don't change permission status for timeouts
+        permissionStatus = state.permissionStatus;
+        break;
+    }
+
+    setState(prev => ({
+      ...prev,
+      error: errorMessage,
+      loading: false,
+      permissionStatus,
+      isTracking: false
+    }));
+
+    // For timeouts, automatically retry after a short delay
+    if (error.code === error.TIMEOUT) {
+      setTimeout(() => {
+        if (navigator.geolocation) {
+          console.log('🔄 Retrying location request after timeout...');
+          startLocationTracking();
+        }
+      }, 2000);
+    }
+  };
+
+  const startLocationTracking = () => {
+    if (!navigator.geolocation) {
+      console.error('❌ Geolocation not supported in this browser');
+      setState(prev => ({
+        ...prev,
+        error: 'Geolocation not supported in this browser',
         loading: false,
-        permissionStatus: 'granted'
-      });
+        permissionStatus: 'denied',
+        isTracking: false
+      }));
+      return;
+    }
+
+    // Clear any existing watch
+    if (watchIdRef.current !== undefined) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+
+    const geoOptions: PositionOptions = {
+      enableHighAccuracy, // Use GPS for highest accuracy
+      timeout,
+      maximumAge
     };
 
-    const handleError = (error: GeolocationPositionError) => {
-      let errorMessage = 'Unknown error';
-      let permissionStatus: GeolocationState['permissionStatus'] = 'unknown';
+    console.log('🎯 Starting live location tracking with options:', geoOptions);
 
-      console.error('❌ Geolocation error:', error);
+    if (enableTracking) {
+      // Continuous tracking with watchPosition (like Google Maps)
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        updateLocation,
+        handleError,
+        geoOptions
+      );
+      console.log('🔄 Started continuous location tracking');
+    } else {
+      // Single position request
+      navigator.geolocation.getCurrentPosition(
+        updateLocation,
+        handleError,
+        geoOptions
+      );
+      console.log('📍 Requested single location');
+    }
+  };
 
-      switch (error.code) {
-        case error.PERMISSION_DENIED:
-          errorMessage = 'Location access denied by user';
-          permissionStatus = 'denied';
-          break;
-        case error.POSITION_UNAVAILABLE:
-          errorMessage = 'Location information unavailable';
-          break;
-        case error.TIMEOUT:
-          errorMessage = 'Location request timeout';
-          break;
-      }
+  const stopLocationTracking = () => {
+    if (watchIdRef.current !== undefined) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = undefined;
+    }
+    
+    if (trackingIntervalRef.current) {
+      clearInterval(trackingIntervalRef.current);
+      trackingIntervalRef.current = undefined;
+    }
 
-      // If geolocation fails and fallback is enabled, use IP-based location
-      if (enableFallback && error.code !== error.PERMISSION_DENIED) {
-        console.log('🔄 Trying IP-based location fallback...');
-        tryIPLocation();
-      } else {
-        setState(prev => ({
-          ...prev,
-          error: errorMessage,
-          loading: false,
-          permissionStatus
-        }));
-      }
-    };
+    setState(prev => ({
+      ...prev,
+      isTracking: false
+    }));
 
-    const tryIPLocation = async () => {
-      try {
-        console.log('🌐 Attempting IP-based location...');
-        
-        // Try multiple IP location services
-        const services = [
-          'https://ipapi.co/json/',
-          'https://ip-api.com/json/',
-          'https://ipinfo.io/json'
-        ];
+    console.log('⏹️ Stopped location tracking');
+  };
 
-        for (const service of services) {
-          try {
-            const response = await fetch(service);
-            const data = await response.json();
-            
-            let lat, lng;
-            
-            // Handle different API response formats
-            if (data.latitude && data.longitude) {
-              lat = data.latitude;
-              lng = data.longitude;
-            } else if (data.lat && data.lon) {
-              lat = data.lat;
-              lng = data.lon;
-            } else if (data.loc) {
-              [lat, lng] = data.loc.split(',').map(Number);
-            }
+  const requestLocation = () => {
+    console.log('🔄 Manual location request triggered');
+    setState(prev => ({ 
+      ...prev, 
+      loading: true, 
+      error: null 
+    }));
+    
+    startLocationTracking();
+  };
 
-            if (lat && lng) {
-              console.log(`✅ IP location from ${service}:`, { lat, lng });
-              setState({
-                latitude: lat,
-                longitude: lng,
-                accuracy: 10000, // IP accuracy is low
-                error: null,
-                loading: false,
-                permissionStatus: 'granted'
-              });
-              return;
-            }
-          } catch (err) {
-            console.warn(`⚠️ IP service ${service} failed:`, err);
-            continue;
-          }
-        }
-        
-        // If all IP services fail, use Bengaluru as final fallback
-        throw new Error('All IP location services failed');
-        
-      } catch (err) {
-        console.log('🏙️ Using Bengaluru fallback location');
-        setState({
-          latitude: 12.9716, // Bengaluru center
-          longitude: 77.5946,
-          accuracy: 50000,
-          error: 'Using approximate location (Bengaluru)',
-          loading: false,
-          permissionStatus: 'granted'
-        });
-      }
-    };
-
-    const checkPermissionAndGetLocation = async () => {
-      // Check if geolocation is supported
-      if (!navigator.geolocation) {
-        console.error('❌ Geolocation not supported');
-        if (enableFallback) {
-          tryIPLocation();
-        } else {
-          setState(prev => ({
-            ...prev,
-            error: 'Geolocation not supported',
-            loading: false,
-            permissionStatus: 'denied'
-          }));
-        }
-        return;
-      }
-
-      // Check permission status if available
+  // Check permission status
+  useEffect(() => {
+    const checkPermissionStatus = async () => {
       try {
         if ('permissions' in navigator) {
           const permission = await navigator.permissions.query({ name: 'geolocation' });
-          console.log('🔐 Permission status:', permission.state);
+          console.log('🔐 Location permission status:', permission.state);
           
           setState(prev => ({ 
             ...prev, 
             permissionStatus: permission.state as any 
           }));
 
+          // Listen for permission changes
           permission.addEventListener('change', () => {
             console.log('🔄 Permission changed to:', permission.state);
             setState(prev => ({ 
               ...prev, 
               permissionStatus: permission.state as any 
             }));
+
+            // If permission granted, start tracking
+            if (permission.state === 'granted') {
+              startLocationTracking();
+            } else if (permission.state === 'denied') {
+              stopLocationTracking();
+            }
           });
         }
       } catch (e) {
         console.warn('⚠️ Permissions API not supported');
       }
-
-      // Set timeout for geolocation
-      timeoutId = setTimeout(() => {
-        console.log('⏰ Geolocation timeout, trying fallback...');
-        if (enableFallback) {
-          tryIPLocation();
-        }
-      }, timeout);
-
-      const geoOptions: PositionOptions = {
-        enableHighAccuracy,
-        timeout,
-        maximumAge
-      };
-
-      console.log('🎯 Requesting geolocation with options:', geoOptions);
-
-      if (watch) {
-        watchId = navigator.geolocation.watchPosition(
-          (position) => {
-            clearTimeout(timeoutId);
-            updateLocation(position);
-          },
-          handleError,
-          geoOptions
-        );
-      } else {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            clearTimeout(timeoutId);
-            updateLocation(position);
-          },
-          handleError,
-          geoOptions
-        );
-      }
     };
 
-    checkPermissionAndGetLocation();
+    checkPermissionStatus();
+  }, []);
 
+  // Initialize location tracking
+  useEffect(() => {
+    startLocationTracking();
+
+    // Cleanup on unmount
     return () => {
-      if (watchId !== undefined) {
-        navigator.geolocation.clearWatch(watchId);
-      }
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      stopLocationTracking();
     };
-  }, [enableHighAccuracy, timeout, maximumAge, watch, enableFallback]);
+  }, [enableHighAccuracy, timeout, maximumAge, enableTracking]);
 
-  const requestLocation = () => {
-    console.log('🔄 Manual location request triggered');
-    setState(prev => ({ ...prev, loading: true, error: null }));
-    
-    if (!navigator.geolocation) {
-      setState(prev => ({
-        ...prev,
-        error: 'Geolocation not supported',
-        loading: false,
-        permissionStatus: 'denied'
-      }));
-      return;
+  // Optional: Enhanced tracking interval for better responsiveness
+  useEffect(() => {
+    if (enableTracking && state.permissionStatus === 'granted') {
+      trackingIntervalRef.current = setInterval(() => {
+        // Only refresh if we haven't had an update recently
+        const timeSinceLastUpdate = Date.now() - lastUpdateRef.current;
+        if (timeSinceLastUpdate > trackingInterval) {
+          console.log('🔄 Periodic location refresh...');
+          navigator.geolocation.getCurrentPosition(
+            updateLocation,
+            (error) => {
+              // Don't show errors for periodic updates unless it's permission denied
+              if (error.code === error.PERMISSION_DENIED) {
+                handleError(error);
+              }
+            },
+            {
+              enableHighAccuracy,
+              timeout: 5000, // Shorter timeout for periodic updates
+              maximumAge: 0 // Force fresh location
+            }
+          );
+        }
+      }, trackingInterval);
+
+      return () => {
+        if (trackingIntervalRef.current) {
+          clearInterval(trackingIntervalRef.current);
+        }
+      };
     }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        console.log('✅ Manual location obtained:', {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        });
-        setState({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          error: null,
-          loading: false,
-          permissionStatus: 'granted'
-        });
-      },
-      (error) => {
-        console.error('❌ Manual location error:', error);
-        setState(prev => ({
-          ...prev,
-          error: error.message,
-          loading: false,
-          permissionStatus: 'denied'
-        }));
-      },
-      { 
-        enableHighAccuracy: true, 
-        timeout: 10000, 
-        maximumAge: 0 // Force fresh location
-      }
-    );
-  };
+  }, [enableTracking, state.permissionStatus, trackingInterval, enableHighAccuracy]);
 
   return {
     ...state,
     requestLocation,
+    stopTracking: stopLocationTracking,
+    startTracking: startLocationTracking,
     isSupported: 'geolocation' in navigator
   };
 }
