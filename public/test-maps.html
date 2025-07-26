@@ -1,0 +1,55 @@
+// Test Google Maps API Key
+// Open this in browser: http://localhost:3000/test-maps.html
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Google Maps API Key</title>
+    <style>
+        #map { height: 400px; width: 100%; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Google Maps API Key Test</h1>
+    <div id="status" class="status">Testing API key...</div>
+    <div id="map"></div>
+
+    <script>
+        function initMap() {
+            console.log('Google Maps API loaded successfully!');
+            document.getElementById('status').innerHTML = '✅ Google Maps API loaded successfully!';
+            document.getElementById('status').className = 'status success';
+            
+            const map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 12.9716, lng: 77.5946 }, // Bengaluru
+                zoom: 12
+            });
+            
+            // Add a marker
+            new google.maps.Marker({
+                position: { lat: 12.9716, lng: 77.5946 },
+                map: map,
+                title: 'Bengaluru'
+            });
+        }
+
+        function handleError() {
+            console.error('Failed to load Google Maps API');
+            document.getElementById('status').innerHTML = '❌ Failed to load Google Maps API. Check console for details.';
+            document.getElementById('status').className = 'status error';
+        }
+
+        // Load Google Maps API
+        window.onload = function() {
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyAbrSHLeBCY8W6wXbFQVhMpugJm0cw_yuo&callback=initMap`;
+            script.onerror = handleError;
+            document.head.appendChild(script);
+        };
+    </script>
+</body>
+</html>

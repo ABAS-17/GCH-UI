@@ -1,24 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import MapView from '@/components/MapView'
+import GoogleMapView from '@/components/GoogleMapView'
 import IncidentList from '@/components/IncidentList'
 import MapFilters from '@/components/MapFilters'
-
-interface Incident {
-  id: string
-  type: 'traffic' | 'weather' | 'infrastructure' | 'events' | 'safety'
-  title: string
-  description: string
-  location: {
-    lat: number
-    lng: number
-  }
-  severity: 'low' | 'medium' | 'high' | 'critical'
-  distance_km: number
-  created_at: string
-  affected_count?: number
-}
+import { useGeolocation } from '@/lib/hooks/useGeolocation'
+import { useIncidents, type ProcessedIncident } from '@/lib/hooks/useIncidents'
+import { incidentsAPI } from '@/lib/api/incidents'
+import { RefreshCw, MapPin, AlertCircle, Navigation, Loader, Database } from 'lucide-react'
 
 const INCIDENT_TYPES = [
   { key: 'all', label: 'All', icon: '🌟', color: 'bg-gray-500' },
@@ -29,25 +18,60 @@ const INCIDENT_TYPES = [
   { key: 'safety', label: 'Safety', icon: '🚨', color: 'bg-purple-500' },
 ]
 
-export default function MapsPage() {
-  const [incidents, setIncidents] = useState<Incident[]>([])
-  const [filteredIncidents, setFilteredIncidents] = useState<Incident[]>([])
+// Main component function
+function MapsPage() {
+  const [filteredIncidents, setFilteredIncidents] = useState<ProcessedIncident[]>([])
   const [activeFilter, setActiveFilter] = useState<string>('all')
-  const [isLoading, setIsLoading] = useState(true)
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
+  const [selectedIncident, setSelectedIncident] = useState<ProcessedIncident | null>(null)
+  const [searchRadius, setSearchRadius] = useState(20)
+  const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null)
 
-  // User location (HSR Layout, Bengaluru)
-  const userLocation = {
-    lat: 12.9120,
-    lng: 77.6365
-  }
+  // Enhanced geolocation
+  const {
+    latitude,
+    longitude,
+    accuracy,
+    error: locationError,
+    loading: locationLoading,
+    permissionStatus,
+    requestLocation
+  } = useGeolocation({
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 300000,
+    enableFallback: true
+  });
 
+  // PURE BACKEND incidents hook
+  const {
+    incidents,
+    isLoading: incidentsLoading,
+    error: incidentsError,
+    lastUpdated,
+    totalCount,
+    refetch: refetchIncidents,
+    fetchByTopic,
+    searchIncidents
+  } = useIncidents({
+    latitude,
+    longitude,
+    radiusKm: searchRadius,
+    maxResults: 100,
+    autoRefresh: true,
+    refreshInterval: 30000
+  });
+
+  // Check backend health on mount
   useEffect(() => {
-    loadIncidents()
-  }, [])
+    const checkBackend = async () => {
+      const healthy = await incidentsAPI.healthCheck();
+      setBackendHealthy(healthy);
+    };
+    checkBackend();
+  }, []);
 
+  // Filter incidents
   useEffect(() => {
-    // Filter incidents based on active filter
     if (activeFilter === 'all') {
       setFilteredIncidents(incidents)
     } else {
@@ -55,127 +79,17 @@ export default function MapsPage() {
     }
   }, [incidents, activeFilter])
 
-  const loadIncidents = async () => {
-    try {
-      setIsLoading(true)
-
-      // Try to load real incidents from backend
-      const response = await fetch(
-        `http://localhost:8000/events/nearby?lat=${userLocation.lat}&lng=${userLocation.lng}&radius_km=10&max_results=20`
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        
-        if (data.success && data.events) {
-          const mappedIncidents: Incident[] = data.events.map((event: any) => ({
-            id: event.event_id,
-            type: mapEventTopicToType(event.topic),
-            title: event.document?.split('.')[0] || 'Unknown Incident',
-            description: event.document || 'No description available',
-            location: {
-              lat: event.metadata?.latitude || userLocation.lat + (Math.random() - 0.5) * 0.1,
-              lng: event.metadata?.longitude || userLocation.lng + (Math.random() - 0.5) * 0.1
-            },
-            severity: event.metadata?.severity || 'medium',
-            distance_km: event.distance_km || Math.random() * 5,
-            created_at: event.metadata?.created_at || new Date().toISOString(),
-            affected_count: event.metadata?.affected_users || Math.floor(Math.random() * 500) + 50
-          }))
-
-          setIncidents(mappedIncidents)
-        } else {
-          loadMockIncidents()
-        }
-      } else {
-        loadMockIncidents()
-      }
-    } catch (error) {
-      console.error('Error loading incidents:', error)
-      loadMockIncidents()
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const mapEventTopicToType = (topic: string): Incident['type'] => {
-    const mapping: { [key: string]: Incident['type'] } = {
-      'traffic': 'traffic',
-      'weather': 'weather',
-      'infrastructure': 'infrastructure',
-      'events': 'events',
-      'safety': 'safety'
-    }
-    return mapping[topic] || 'traffic'
-  }
-
-  const loadMockIncidents = () => {
-    const mockIncidents: Incident[] = [
-      {
-        id: '1',
-        type: 'traffic',
-        title: 'Accident on ORR Near Silk Board',
-        description: 'Multi-vehicle collision causing heavy traffic delays. Emergency services on site.',
-        location: { lat: 12.9176, lng: 77.6265 },
-        severity: 'critical',
-        distance_km: 2.3,
-        created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        affected_count: 450
-      },
-      {
-        id: '2',
-        type: 'infrastructure',
-        title: 'Power Outage - HSR Layout Sector 2',
-        description: 'Scheduled maintenance causing power disruption. Expected restoration by 6 PM.',
-        location: { lat: 12.9089, lng: 77.6388 },
-        severity: 'high',
-        distance_km: 0.8,
-        created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-        affected_count: 120
-      },
-      {
-        id: '3',
-        type: 'weather',
-        title: 'Heavy Rain Alert - South Bengaluru',
-        description: 'Moderate to heavy rainfall expected in the next 2 hours. Possible waterlogging.',
-        location: { lat: 12.8956, lng: 77.6302 },
-        severity: 'medium',
-        distance_km: 1.9,
-        created_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-        affected_count: 2000
-      },
-      {
-        id: '4',
-        type: 'events',
-        title: 'Tech Meetup - Koramangala',
-        description: 'JavaScript meetup at 91SpringBoard. Registration required.',
-        location: { lat: 12.9352, lng: 77.6245 },
-        severity: 'low',
-        distance_km: 3.2,
-        created_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-        affected_count: 80
-      },
-      {
-        id: '5',
-        type: 'safety',
-        title: 'Road Construction - Bannerghatta Road',
-        description: 'Lane closure for metro construction work. Use alternative routes.',
-        location: { lat: 12.8678, lng: 77.6103 },
-        severity: 'medium',
-        distance_km: 4.5,
-        created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-        affected_count: 300
-      }
-    ]
-
-    setIncidents(mockIncidents)
-  }
-
-  const handleFilterChange = (filterKey: string) => {
+  // Handlers
+  const handleFilterChange = async (filterKey: string) => {
     setActiveFilter(filterKey)
+    if (filterKey !== 'all' && latitude && longitude) {
+      await fetchByTopic(filterKey)
+    } else if (filterKey === 'all') {
+      await refetchIncidents()
+    }
   }
 
-  const handleIncidentSelect = (incident: Incident) => {
+  const handleIncidentSelect = (incident: ProcessedIncident) => {
     setSelectedIncident(incident)
   }
 
@@ -186,7 +100,7 @@ export default function MapsPage() {
     }
   }
 
-  const navigateToChat = (incident: Incident) => {
+  const navigateToChat = (incident: ProcessedIncident) => {
     const context = {
       id: incident.id,
       title: incident.title,
@@ -194,20 +108,160 @@ export default function MapsPage() {
       type: `${incident.type}_incident`,
       priority: incident.severity
     }
-
     const contextParam = encodeURIComponent(JSON.stringify(context))
     window.location.href = `/chat?context=${contextParam}`
   }
+
+  const handleRefresh = async () => {
+    await refetchIncidents()
+  }
+
+  // Populate demo data if no incidents found
+  const handlePopulateDemoData = async () => {
+    try {
+      const success = await incidentsAPI.populateDemoData(15);
+      if (success) {
+        // Wait for indexing then refresh
+        setTimeout(() => {
+          refetchIncidents();
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Failed to populate demo data:', error);
+    }
+  }
+
+  const getLocationSource = () => {
+    if (!latitude || !longitude) return 'No location';
+    if (accuracy && accuracy < 100) return 'GPS';
+    if (accuracy && accuracy < 1000) return 'Network';
+    if (accuracy && accuracy < 10000) return 'IP Location';
+    return 'Approximate';
+  };
+
+  const formatLastUpdated = (date: Date | null) => {
+    if (!date) return 'Never'
+    const now = new Date()
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60))
+    if (diffInMinutes < 1) return 'Just now'
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const incidentCounts = incidents.reduce((acc, incident) => {
+    acc[incident.type] = (acc[incident.type] || 0) + 1
+    return acc
+  }, {} as { [key: string]: number })
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 p-4 shadow-sm">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-xl font-semibold text-gray-900 mb-2">🗺️ Live City Map</h1>
-          <p className="text-sm text-gray-600">
-            Real-time incidents and data • 📍 HSR Layout, Bengaluru
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900 mb-2">🗺️ Live City Map</h1>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-gray-600">PURE BACKEND DATA ONLY</span>
+                <span className="text-gray-400">•</span>
+                {locationLoading ? (
+                  <span className="flex items-center gap-1 text-blue-600">
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Getting location...
+                  </span>
+                ) : latitude && longitude ? (
+                  <span className="flex items-center gap-1 text-green-600">
+                    <Navigation className="w-4 h-4" />
+                    {getLocationSource()}: {latitude.toFixed(4)}, {longitude.toFixed(4)}
+                  </span>
+                ) : (
+                  <span className="text-red-600">📍 Location required</span>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              {/* Populate Demo Data Button (only if no incidents) */}
+              {totalCount === 0 && !incidentsLoading && (
+                <button
+                  onClick={handlePopulateDemoData}
+                  className="flex items-center gap-2 px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+                >
+                  <Database className="w-4 h-4" />
+                  Add Demo Data
+                </button>
+              )}
+
+              {/* Get Location Button */}
+              {(!latitude || !longitude) && (
+                <button
+                  onClick={requestLocation}
+                  disabled={locationLoading}
+                  className="flex items-center gap-2 px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors"
+                >
+                  {locationLoading ? (
+                    <Loader className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <MapPin className="w-4 h-4" />
+                  )}
+                  {locationLoading ? 'Getting Location...' : 'Get My Location'}
+                </button>
+              )}
+
+              {/* Refresh Button */}
+              <button
+                onClick={handleRefresh}
+                disabled={incidentsLoading}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${incidentsLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* Status Bar */}
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <div className="flex items-center gap-4">
+              <span className={`flex items-center gap-1 ${
+                backendHealthy === false ? 'text-red-600' : 
+                backendHealthy === true ? 'text-green-600' : 'text-yellow-600'
+              }`}>
+                <Database className="w-4 h-4" />
+                {backendHealthy === false ? 'Backend Offline' : 
+                 backendHealthy === true ? 'Backend Connected' : 'Checking Backend...'}
+              </span>
+              
+              <span className="text-gray-600">
+                {totalCount} backend incidents • {searchRadius}km radius
+              </span>
+              
+              <span className="text-gray-500">
+                Last fetch: {formatLastUpdated(lastUpdated)}
+              </span>
+            </div>
+
+            {(incidentsError || locationError) && (
+              <div className="flex items-center gap-1 text-red-600">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-xs">{incidentsError || locationError}</span>
+              </div>
+            )}
+          </div>
+
+          {/* No Data State */}
+          {totalCount === 0 && !incidentsLoading && !incidentsError && (
+            <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-yellow-600" />
+                <div className="flex-1">
+                  <p className="text-sm text-yellow-800">
+                    No incidents found in backend within {searchRadius}km radius. Try populating demo data or check if your backend has incidents.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -218,10 +272,7 @@ export default function MapsPage() {
             filters={INCIDENT_TYPES}
             activeFilter={activeFilter}
             onFilterChange={handleFilterChange}
-            incidentCounts={incidents.reduce((acc, incident) => {
-              acc[incident.type] = (acc[incident.type] || 0) + 1
-              return acc
-            }, {} as { [key: string]: number })}
+            incidentCounts={incidentCounts}
           />
         </div>
       </div>
@@ -230,12 +281,11 @@ export default function MapsPage() {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Map */}
         <div className="flex-1 relative">
-          <MapView
-            center={userLocation}
+          <GoogleMapView
             incidents={filteredIncidents}
             selectedIncident={selectedIncident}
             onIncidentClick={handleMapIncidentClick}
-            isLoading={isLoading}
+            isLoading={incidentsLoading || locationLoading}
           />
         </div>
 
@@ -243,10 +293,13 @@ export default function MapsPage() {
         <div className="lg:w-80 bg-white border-l border-gray-200 flex flex-col max-h-96 lg:max-h-none">
           <div className="p-4 border-b border-gray-200">
             <h2 className="font-semibold text-gray-900">
-              {activeFilter === 'all' ? 'All Incidents' : INCIDENT_TYPES.find(f => f.key === activeFilter)?.label}
+              {activeFilter === 'all' ? 'All Backend Incidents' : INCIDENT_TYPES.find(f => f.key === activeFilter)?.label}
             </h2>
             <p className="text-sm text-gray-600 mt-1">
-              {filteredIncidents.length} incident{filteredIncidents.length !== 1 ? 's' : ''} found
+              {filteredIncidents.length} incident{filteredIncidents.length !== 1 ? 's' : ''} from backend
+              {lastUpdated && (
+                <span className="text-gray-400"> • {formatLastUpdated(lastUpdated)}</span>
+              )}
             </p>
           </div>
           
@@ -255,10 +308,13 @@ export default function MapsPage() {
             selectedIncident={selectedIncident}
             onIncidentSelect={handleIncidentSelect}
             onChatClick={navigateToChat}
-            isLoading={isLoading}
+            isLoading={incidentsLoading}
           />
         </div>
       </div>
     </div>
   )
 }
+
+// REQUIRED: Default export for Next.js App Router
+export default MapsPage;
