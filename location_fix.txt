@@ -1,0 +1,12 @@
+      // Prepare event data for backend - MATCH BACKEND SCHEMA EXACTLY
+      const eventData = {
+        topic, // Now guaranteed to be one of: traffic, infrastructure, weather, events, safety
+        sub_topic: topic, // Use same as topic for now
+        title: title.trim(),
+        description: description.trim(),
+        location: location ? location : DEFAULT_LOCATION, // Send the full location object, not nested
+        address: location?.address || DEFAULT_LOCATION.address,
+        severity,
+        media_urls: mediaUrls
+        // Remove media_files from here - it's causing the location parsing issue
+      }

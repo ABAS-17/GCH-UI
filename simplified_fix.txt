@@ -1,0 +1,17 @@
+      // Prepare event data for backend - SIMPLIFIED to avoid validation issues
+      const coordinates = {
+        lat: location ? location.lat : DEFAULT_LOCATION.lat,
+        lng: location ? location.lng : DEFAULT_LOCATION.lng
+      }
+
+      const eventData = {
+        topic, // EventTopic enum: traffic, infrastructure, weather, events, safety
+        sub_topic: topic, // Use same as topic for now
+        title: title.trim(),
+        description: description.trim(),
+        location: coordinates, // Simple {lat, lng} object
+        address: location?.address || DEFAULT_LOCATION.address,
+        severity, // EventSeverity enum: low, medium, high, critical
+        media_urls: mediaUrls // URLs of uploaded media
+        // Removed optional fields that might cause issues
+      }

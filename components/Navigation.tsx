@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, MessageCircle, Map, User } from 'lucide-react'
+import { Home, MessageCircle, Map, User, PlusCircle } from 'lucide-react'
 
 const navigationItems = [
   {
@@ -16,6 +16,12 @@ const navigationItems = [
     href: '/chat',
     icon: MessageCircle,
     label: 'Assistant'
+  },
+  {
+    name: 'Posts',
+    href: '/posts',
+    icon: PlusCircle,
+    label: 'Community'
   },
   {
     name: 'Maps',
@@ -33,6 +39,11 @@ const navigationItems = [
 
 export default function Navigation() {
   const pathname = usePathname()
+
+  // Hide navigation on auth pages
+  if (pathname.startsWith('/auth')) {
+    return null
+  }
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">

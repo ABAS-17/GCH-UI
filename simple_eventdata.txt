@@ -1,0 +1,18 @@
+      // Prepare event data with explicit Coordinates structure
+      const coordinates = {
+        lat: location ? location.lat : DEFAULT_LOCATION.lat,
+        lng: location ? location.lng : DEFAULT_LOCATION.lng
+      }
+
+      // Try removing problematic fields that might interfere
+      const eventData = {
+        topic,
+        sub_topic: topic,
+        title: title.trim(),
+        description: description.trim(),
+        location: coordinates,
+        address: location?.address || DEFAULT_LOCATION.address,
+        severity,
+        media_urls: mediaUrls
+        // Remove all optional fields to simplify
+      }

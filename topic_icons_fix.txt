@@ -1,0 +1,8 @@
+const TOPIC_ICONS: Record<string, string> = {
+  traffic: '🚗',
+  infrastructure: '⚡',
+  weather: '🌧️',
+  safety: '🚨',
+  events: '🎉', // Changed from 'community' to 'events'
+  community: '🎉' // Keep for backward compatibility
+}
