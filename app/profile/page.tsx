@@ -3,11 +3,12 @@
 import { useState, useEffect } from 'react'
 import ProfileSection from '@/components/ProfileSection'
 import PreferenceGrid from '@/components/PreferenceGrid'
-import { User, Save, MapPin, Bell, Settings } from 'lucide-react'
+import { User, Save, MapPin, Bell, Settings, LogOut } from 'lucide-react'
 
 interface UserProfile {
   id: string
   name: string
+  username: string
   email: string
   avatar_url?: string
   home_address: string
@@ -33,11 +34,12 @@ const INTEREST_OPTIONS = [
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile>({
-    id: 'arjun_user_id',
-    name: 'Arjun Sharma',
-    email: 'arjun.sharma@email.com',
-    home_address: 'HSR Layout Sector 2, Bengaluru',
-    work_address: 'Electronic City Phase 1, Bengaluru',
+    id: '',
+    name: '',
+    username: '',
+    email: '',
+    home_address: '',
+    work_address: '',
     interests: ['traffic', 'weather', 'infrastructure'],
     notification_preferences: {
       morning_briefing: true,
@@ -50,6 +52,7 @@ export default function ProfilePage() {
 
   const [isLoading, setIsLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
 
   useEffect(() => {
     loadUserProfile()
@@ -57,24 +60,56 @@ export default function ProfilePage() {
 
   const loadUserProfile = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/users/${profile.id}`)
-      if (response.ok) {
-        const userData = await response.json()
-        if (userData.success) {
-          // Map backend user data to our profile format
-          const backendUser = userData.user
-          setProfile(prev => ({
-            ...prev,
-            name: backendUser.profile?.name || prev.name,
-            email: backendUser.profile?.email || prev.email,
-            home_address: backendUser.locations?.home?.formatted_address || prev.home_address,
-            work_address: backendUser.locations?.work?.formatted_address || prev.work_address,
-            // Map other fields as needed
-          }))
+      // Get user data from localStorage (stored after login)
+      const userId = localStorage.getItem('userId')
+      const username = localStorage.getItem('username')
+      const userEmail = localStorage.getItem('userEmail')
+      const authToken = localStorage.getItem('authToken')
+      const isAuth = localStorage.getItem('isAuthenticated') === 'true'
+
+      if (!isAuth || !userId || !username || !userEmail) {
+        // User not authenticated, redirect to login
+        window.location.href = '/auth'
+        return
+      }
+
+      setIsAuthenticated(true)
+
+      // Set profile data from localStorage
+      setProfile(prev => ({
+        ...prev,
+        id: userId,
+        name: username, // Using username as display name initially
+        username: username,
+        email: userEmail,
+        home_address: prev.home_address || 'HSR Layout Sector 2, Bengaluru',
+        work_address: prev.work_address || 'Electronic City Phase 1, Bengaluru',
+      }))
+
+      // Optionally try to load additional profile data from backend
+      if (authToken) {
+        try {
+          const response = await fetch(`http://localhost:8000/auth/verify?token=${authToken}`)
+          if (response.ok) {
+            const userData = await response.json()
+            if (userData.success) {
+              // Update profile with any additional data from backend
+              setProfile(prev => ({
+                ...prev,
+                name: userData.username || prev.name,
+                username: userData.username || prev.username,
+                email: userData.email || prev.email,
+              }))
+            }
+          }
+        } catch (error) {
+          console.log('Could not verify token with backend:', error)
         }
       }
     } catch (error) {
-      console.log('Using default profile, backend not available:', error)
+      console.error('Error loading user profile:', error)
+      // Redirect to login if there's an error
+      window.location.href = '/auth'
     }
   }
 
@@ -102,11 +137,25 @@ export default function ProfilePage() {
     handleProfileUpdate('notification_preferences', updatedPrefs)
   }
 
+  const handleLogout = () => {
+    // Clear all authentication data
+    localStorage.removeItem('authToken')
+    localStorage.removeItem('userId')
+    localStorage.removeItem('username')
+    localStorage.removeItem('userEmail')
+    localStorage.removeItem('isAuthenticated')
+    
+    // Redirect to auth page
+    window.location.href = '/auth'
+  }
+
   const saveProfile = async () => {
     setIsLoading(true)
     setSaveStatus('saving')
 
     try {
+      const authToken = localStorage.getItem('authToken')
+      
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1000))
 
@@ -115,10 +164,12 @@ export default function ProfilePage() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': authToken ? `Bearer ${authToken}` : '',
         },
         body: JSON.stringify({
           profile: {
             name: profile.name,
+            username: profile.username,
             email: profile.email,
           },
           locations: {
@@ -148,6 +199,20 @@ export default function ProfilePage() {
     }
   }
 
+  // Show loading or redirect if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <User className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-gray-600">Loading your profile...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
@@ -159,25 +224,35 @@ export default function ProfilePage() {
             </div>
             <div>
               <h1 className="text-xl font-semibold text-gray-900">Your Profile</h1>
-              <p className="text-sm text-gray-600">Personalize your city experience</p>
+              <p className="text-sm text-gray-600">Welcome back, {profile.username}!</p>
             </div>
           </div>
           
-          <button
-            onClick={saveProfile}
-            disabled={isLoading}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              saveStatus === 'saved' 
-                ? 'bg-green-100 text-green-700' 
-                : 'bg-primary-500 text-white hover:bg-primary-600'
-            } ${isLoading ? 'opacity-50' : ''}`}
-          >
-            <Save className="w-4 h-4" />
-            {saveStatus === 'saving' && 'Saving...'}
-            {saveStatus === 'saved' && 'Saved!'}
-            {saveStatus === 'idle' && 'Save Changes'}
-            {saveStatus === 'error' && 'Try Again'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={saveProfile}
+              disabled={isLoading}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                saveStatus === 'saved' 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-primary-500 text-white hover:bg-primary-600'
+              } ${isLoading ? 'opacity-50' : ''}`}
+            >
+              <Save className="w-4 h-4" />
+              {saveStatus === 'saving' && 'Saving...'}
+              {saveStatus === 'saved' && 'Saved!'}
+              {saveStatus === 'idle' && 'Save Changes'}
+              {saveStatus === 'error' && 'Try Again'}
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
+          </div>
         </div>
       </header>
 
@@ -191,15 +266,30 @@ export default function ProfilePage() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Full Name
+                Username
+              </label>
+              <input
+                type="text"
+                value={profile.username}
+                onChange={(e) => handleProfileUpdate('username', e.target.value)}
+                className="input-primary"
+                placeholder="Enter your username"
+              />
+              <p className="text-xs text-gray-500 mt-1">This is how others will see you in the app</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Display Name
               </label>
               <input
                 type="text"
                 value={profile.name}
                 onChange={(e) => handleProfileUpdate('name', e.target.value)}
                 className="input-primary"
-                placeholder="Enter your full name"
+                placeholder="Enter your display name"
               />
+              <p className="text-xs text-gray-500 mt-1">Your full name or preferred display name</p>
             </div>
             
             <div>
@@ -210,9 +300,30 @@ export default function ProfilePage() {
                 type="email"
                 value={profile.email}
                 onChange={(e) => handleProfileUpdate('email', e.target.value)}
-                className="input-primary"
+                className="input-primary bg-gray-50"
                 placeholder="Enter your email"
+                readOnly
               />
+              <p className="text-xs text-gray-500 mt-1">Email cannot be changed. Contact support if needed.</p>
+            </div>
+
+            {/* Account Info Display */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-medium text-blue-900 mb-2">Account Information</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-blue-700">User ID:</span>
+                  <span className="text-blue-900 font-mono text-xs">{profile.id}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-700">Registered Email:</span>
+                  <span className="text-blue-900">{profile.email}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-700">Username:</span>
+                  <span className="text-blue-900">@{profile.username}</span>
+                </div>
+              </div>
             </div>
           </div>
         </ProfileSection>

@@ -137,7 +137,6 @@ export default function PulseCard({ card, animationDelay = 0 }: PulseCardProps) 
 
     try {
       setIsExpanding(true)
-      console.log(`🔍 Expanding card: ${card.id}`)
       
       const expansionData = await backendConnection.expandCard(
         card.user_id,
@@ -149,7 +148,6 @@ export default function PulseCard({ card, animationDelay = 0 }: PulseCardProps) 
       if (expansionData.success) {
         setExpansion(expansionData)
         setShowExpansion(true)
-        console.log('✅ Card expansion loaded:', expansionData.total_events, 'events')
       } else {
         console.error('❌ Card expansion failed')
       }
