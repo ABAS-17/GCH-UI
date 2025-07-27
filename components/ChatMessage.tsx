@@ -18,7 +18,6 @@ interface ChatMessageProps {
 
 export default function ChatMessage({ message, onSuggestionClick, showSuggestions }: ChatMessageProps) {
   const isUser = message.role === 'user'
-  const isAssistant = message.role === 'assistant'
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -29,8 +28,8 @@ export default function ChatMessage({ message, onSuggestionClick, showSuggestion
       {/* Avatar */}
       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
         isUser 
-          ? 'bg-primary-500 text-white' 
-          : 'bg-gray-200 text-gray-600'
+          ? 'bg-blue-500 text-white' 
+          : 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white'
       }`}>
         {isUser ? (
           <UserIcon className="w-4 h-4" />
@@ -43,8 +42,8 @@ export default function ChatMessage({ message, onSuggestionClick, showSuggestion
       <div className={`flex-1 max-w-[80%] ${isUser ? 'flex flex-col items-end' : ''}`}>
         <div className={`rounded-2xl px-4 py-3 ${
           isUser
-            ? 'bg-primary-500 text-white rounded-br-sm'
-            : 'bg-gray-100 text-gray-900 rounded-bl-sm'
+            ? 'bg-blue-500 text-white rounded-br-sm'
+            : 'bg-white text-gray-900 rounded-bl-sm shadow-sm border border-gray-200'
         }`}>
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
             {message.content}
@@ -60,13 +59,13 @@ export default function ChatMessage({ message, onSuggestionClick, showSuggestion
         </div>
 
         {/* Suggestions */}
-        {showSuggestions && isAssistant && message.suggestions && message.suggestions.length > 0 && (
+        {showSuggestions && !isUser && message.suggestions && message.suggestions.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {message.suggestions.map((suggestion, index) => (
               <button
                 key={index}
                 onClick={() => onSuggestionClick(suggestion)}
-                className="bg-primary-50 hover:bg-primary-100 text-primary-700 px-3 py-1.5 rounded-full text-sm transition-colors duration-200 border border-primary-200"
+                className="bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 text-blue-700 px-3 py-2 rounded-full text-sm transition-all duration-200 border border-blue-200 hover:border-blue-300"
               >
                 {suggestion}
               </button>

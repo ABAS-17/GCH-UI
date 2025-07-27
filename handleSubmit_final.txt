@@ -1,0 +1,97 @@
+  // Handle form submission with better error handling
+  const handleSubmit = async () => {
+    if (!title.trim() || !description.trim()) {
+      alert('Please fill in title and description')
+      return
+    }
+
+    setIsSubmitting(true)
+
+    try {
+      // Check if any files are still analyzing
+      const stillAnalyzing = mediaFiles.filter(f => f.analyzing)
+      if (stillAnalyzing.length > 0) {
+        alert(`Please wait for ${stillAnalyzing.length} media file(s) to finish processing.`)
+        setIsSubmitting(false)
+        return
+      }
+
+      // Upload any remaining media files (shouldn't be any at this point)
+      const mediaUrls = await uploadMediaFiles(mediaFiles.filter(f => !f.analysis))
+      
+      // Prepare location in the EXACT format backend expects
+      const coordinates = location ? {
+        lat: location.lat,
+        lng: location.lng
+      } : {
+        lat: DEFAULT_LOCATION.lat,
+        lng: DEFAULT_LOCATION.lng
+      }
+
+      // Prepare event data for backend - MATCH BACKEND SCHEMA EXACTLY
+      const eventData = {
+        topic, // Now guaranteed to be one of: traffic, infrastructure, weather, events, safety
+        sub_topic: topic, // Use same as topic for now
+        title: title.trim(),
+        description: description.trim(),
+        location: coordinates, // Send as simple {lat, lng} object
+        address: location?.address || DEFAULT_LOCATION.address,
+        severity,
+        media_urls: mediaUrls
+        // Don't include media_files array here as it may be causing parsing issues
+      }
+
+      console.log('🚀 Submitting event to backend:', eventData)
+
+      // Submit to your backend using the enhanced events endpoint
+      const response = await fetch(`${API_BASE_URL}/events/enhanced`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(eventData)
+      })
+
+      const result = await response.json()
+      
+      console.log('📡 Backend response:', result)
+
+      if (!response.ok) {
+        throw new Error(`Backend error: ${response.status} - ${result.error || result.detail || response.statusText}`)
+      }
+
+      if (result.success) {
+        console.log('✅ Event created successfully:', result.event_id)
+        
+        // Call parent callback with result
+        if (onSubmit) {
+          await onSubmit({
+            ...eventData,
+            id: result.event_id,
+            backend_response: result
+          })
+        }
+
+        // Reset form
+        setTitle('')
+        setDescription('')
+        setTopic('events') // Reset to default valid topic
+        setSeverity('medium')
+        setMediaFiles([])
+        setLocation(null)
+
+        if (onClose) {
+          onClose()
+        }
+        
+        alert(`Post created successfully! Event ID: ${result.event_id}`)
+      } else {
+        throw new Error(result.message || 'Failed to create event')
+      }
+    } catch (error) {
+      console.error('❌ Error submitting event:', error)
+      alert(`Failed to create post: ${error.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }

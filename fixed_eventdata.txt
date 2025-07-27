@@ -1,0 +1,18 @@
+      // Prepare event data for backend - MATCH BACKEND SCHEMA EXACTLY
+      const eventData = {
+        topic, // Now guaranteed to be one of: traffic, infrastructure, weather, events, safety
+        sub_topic: topic, // Use same as topic for now
+        title: title.trim(),
+        description: description.trim(),
+        location: location ? {
+          lat: location.lat,
+          lng: location.lng
+        } : {
+          lat: DEFAULT_LOCATION.lat,
+          lng: DEFAULT_LOCATION.lng
+        },
+        address: location?.address || DEFAULT_LOCATION.address,
+        severity,
+        media_urls: mediaUrls
+        // Removed media_files array - it may be causing backend parsing issues
+      }

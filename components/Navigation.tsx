@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, MessageCircle, Map, User } from 'lucide-react'
+import { Home, MessageCircle, Map, User, PlusCircle } from 'lucide-react'
 
 const navigationItems = [
   {
@@ -16,6 +16,12 @@ const navigationItems = [
     href: '/chat',
     icon: MessageCircle,
     label: 'Assistant'
+  },
+  {
+    name: 'Posts',
+    href: '/posts',
+    icon: PlusCircle,
+    label: 'Community'
   },
   {
     name: 'Maps',

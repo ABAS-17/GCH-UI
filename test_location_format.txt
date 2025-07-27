@@ -1,0 +1,16 @@
+      // TEST: Send location in a different format to see what works
+      const eventData = {
+        topic,
+        sub_topic: topic,
+        title: title.trim(),
+        description: description.trim(),
+        // Try sending Coordinates-like object
+        location: {
+          lat: location ? location.lat : DEFAULT_LOCATION.lat,
+          lng: location ? location.lng : DEFAULT_LOCATION.lng
+        },
+        address: location?.address || DEFAULT_LOCATION.address,
+        severity,
+        media_files: [], // Empty array as required
+        media_urls: mediaUrls
+      }
